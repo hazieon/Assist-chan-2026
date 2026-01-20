@@ -33,6 +33,9 @@ const InstructionDisplay: React.FC<InstructionDisplayProps> = ({
 }) => {
     const allStepsCompleted = completedSteps.length > 0 && completedSteps.every(Boolean);
 
+    // Only show the eco button if there is a suggestion (meat/dairy detected) OR if we already switched (Eco Applied)
+    const showEcoButton = !!instructionSet.sustainabilitySuggestion || isEcoApplied;
+
     return (
         <div className="bg-secondary p-6 rounded-lg shadow-lg animate-fade-in">
             <h2 className="text-3xl font-bold mb-6 border-b-2 border-accent pb-4">{instructionSet.title}</h2>
@@ -40,23 +43,25 @@ const InstructionDisplay: React.FC<InstructionDisplayProps> = ({
             <div className="mb-8">
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xl font-semibold text-accent">Materials / Ingredients</h3>
-                    <button
-                        onClick={onEcoSwitch}
-                        disabled={isModifying || isEcoApplied}
-                        className={`flex items-center justify-center rounded-full p-2 transition-all shadow-lg group ${
-                            isEcoApplied 
-                            ? 'bg-gray-600 cursor-not-allowed opacity-70' 
-                            : 'bg-green-600 hover:bg-green-700 hover:scale-110'
-                        }`}
-                        aria-label={isEcoApplied ? "Sustainable version applied" : "Switch to sustainable version"}
-                        title={isEcoApplied ? "Sustainable version applied!" : "Switch to a sustainable version"}
-                    >
-                        {isEcoApplied ? (
-                            <SmileIcon className="w-8 h-8 text-gray-300" />
-                        ) : (
-                            <LeafIcon className="w-8 h-8 text-white group-hover:animate-pulse" />
-                        )}
-                    </button>
+                    {showEcoButton && (
+                        <button
+                            onClick={onEcoSwitch}
+                            disabled={isModifying || isEcoApplied}
+                            className={`flex items-center justify-center rounded-full p-2 transition-all shadow-lg group ${
+                                isEcoApplied 
+                                ? 'bg-gray-600 cursor-not-allowed opacity-70' 
+                                : 'bg-green-600 hover:bg-green-700 hover:scale-110'
+                            }`}
+                            aria-label={isEcoApplied ? "Sustainable version applied" : "Switch to sustainable version"}
+                            title={isEcoApplied ? "Sustainable version applied!" : "Switch to a sustainable version"}
+                        >
+                            {isEcoApplied ? (
+                                <SmileIcon className="w-8 h-8 text-gray-300" />
+                            ) : (
+                                <LeafIcon className="w-8 h-8 text-white group-hover:animate-pulse" />
+                            )}
+                        </button>
+                    )}
                 </div>
                 <ul className="list-disc list-inside space-y-2 text-text-secondary">
                     {instructionSet.materials.map((material, index) => (
