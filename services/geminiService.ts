@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Content } from '@google/genai';
+import { GoogleGenAI, Content, Type } from '@google/genai';
 import { InstructionSet, ChatMessage, Role } from '../types';
 
 if (!process.env.API_KEY) {
@@ -57,37 +57,32 @@ export const modifyInstructions = async (
     instructions: InstructionSet,
     modificationPrompt: string
 ): Promise<InstructionSet> => {
-    const prompt = `You are an instruction modification assistant. The user wants to modify the following set of instructions.
+    const prompt = `You are a high-level instruction modification engine. You MUST update the following instructions JSON based on the request.
 
-Current Instructions JSON:
+Current Data:
 ${JSON.stringify(instructions, null, 2)}
 
-Modification Request:
+Action Required:
 "${modificationPrompt}"
 
-Your task is to apply the modification and return the *entire, updated* set of instructions as a single, valid JSON object. The JSON object must have the keys "title", "materials", and "steps". Do not include any markdown formatting, backticks, or explanatory text outside of the JSON object.
-
-Important Conversion Rules:
-- When converting to metric, use appropriate units like grams (g) or kilograms (kg) for solids and milliliters (ml) or liters (L) for liquids. Be intelligent about the conversion. For example, don't convert "1 egg" to grams unless specified.
-- When converting to US Imperial, use appropriate units like cups, tablespoons, teaspoons for volume, and ounces (oz) or pounds (lb) for weight.
-- When scaling (e.g., doubling), apply the scaling to all relevant quantities in both the "materials" list and the "steps" text.
-- Ensure the "title", "materials", and "steps" keys are present in your JSON output.`;
+Rules for Output:
+1. Return ONLY a valid JSON object with keys: "title", "materials", "steps".
+2. If the request is for a sustainable or vegan swap: Remove ALL animal-based ingredients (meat, poultry, fish, seafood, eggs, dairy, honey). Substitute them with appropriate plant-based alternatives (e.g., beans, lentils, tofu, plant milk, flax eggs).
+3. Update ALL instructions/steps to reflect the new materials. For example, if "beef" was swapped for "lentils", the steps must say "cook the lentils" instead of "brown the beef".
+4. Adjust quantities if necessary for the substitution to work correctly.
+5. NO markdown, NO text, JUST the JSON object.`;
 
     try {
         const response = await ai.models.generateContent({
             model: "gemini-3-pro-preview",
             contents: prompt,
+            config: {
+              responseMimeType: "application/json"
+            }
         });
 
         const text = response.text.trim();
-        
-        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```|({[\s\S]*})/);
-        if (!jsonMatch) {
-            throw new Error("No JSON object found in the model's response.");
-        }
-    
-        const jsonString = (jsonMatch[1] || jsonMatch[2]).trim();
-        const parsed = JSON.parse(jsonString) as InstructionSet;
+        const parsed = JSON.parse(text) as InstructionSet;
 
         if (!parsed.title || !Array.isArray(parsed.materials) || !Array.isArray(parsed.steps)) {
             throw new Error('Invalid instruction structure in API response.');
@@ -109,24 +104,24 @@ Important Conversion Rules:
 };
 
 export const getSustainableSuggestion = async (title: string, materials: string[]): Promise<string | null> => {
-    const meatFishKeywords = ['chicken', 'beef', 'pork', 'lamb', 'turkey', 'fish', 'salmon', 'tuna', 'shrimp', 'cod', 'veal', 'mutton'];
+    const meatFishKeywords = ['chicken', 'beef', 'pork', 'lamb', 'turkey', 'fish', 'salmon', 'tuna', 'shrimp', 'cod', 'veal', 'mutton', 'ground meat', 'steak', 'bacon', 'ham', 'egg', 'cheese', 'milk', 'cream', 'butter'];
     
-    const hasMeatOrFish = materials.some(material => 
+    const hasAnimalProducts = materials.some(material => 
         meatFishKeywords.some(keyword => material.toLowerCase().includes(keyword))
     );
 
-    if (!hasMeatOrFish) {
+    if (!hasAnimalProducts) {
         return null;
     }
 
-    const prompt = `The following recipe, "${title}", contains meat or fish. Provide a very brief (max one sentence) sustainable plant-based alternative. Do not use any introductory filler.`;
+    const prompt = `The following recipe, "${title}", contains animal products. Provide a very brief (max one sentence) sustainable vegan alternative swap (e.g., "Swap the beef for 2 cups of brown lentils and the milk for soy milk"). Do not use any introductory filler.`;
 
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
         });
-        return `**Sustainability Suggestion:** ${response.text.trim()}`;
+        return response.text.trim();
     } catch (error) {
         console.error("Error getting sustainable suggestion:", error);
         return null;

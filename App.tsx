@@ -16,6 +16,7 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isAnswering, setIsAnswering] = useState<boolean>(false);
     const [isModifying, setIsModifying] = useState<boolean>(false);
+    const [isEcoApplied, setIsEcoApplied] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [chatHistory, setChatHistory] = useState<ChatMessageType[]>([]);
     const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -54,11 +55,19 @@ const App: React.FC = () => {
         setInstructionSet(null);
         setChatHistory([]);
         setCompletedSteps([]);
+        setIsEcoApplied(false);
         window.speechSynthesis.cancel();
         setIsReadingInstructions(false);
 
         try {
             const extractedInstructions = await extractInstructionsFromUrl(url);
+            
+            const suggestion = await getSustainableSuggestion(extractedInstructions.title, extractedInstructions.materials);
+            
+            if (suggestion) {
+                extractedInstructions.sustainabilitySuggestion = suggestion;
+            }
+
             setInstructionSet(extractedInstructions);
             setCompletedSteps(new Array(extractedInstructions.steps.length).fill(false));
             
@@ -66,16 +75,21 @@ const App: React.FC = () => {
             const welcomeMessage: ChatMessageType = { role: Role.ASSISTANT, content: welcomeMessageText };
             let initialChat: ChatMessageType[] = [welcomeMessage];
             
-            const suggestion = await getSustainableSuggestion(extractedInstructions.title, extractedInstructions.materials);
             if (suggestion) {
-                const suggestionMessage: ChatMessageType = { role: Role.ASSISTANT, content: suggestion };
+                const suggestionMessage: ChatMessageType = { 
+                    role: Role.ASSISTANT, 
+                    content: `**Sustainability Suggestion:** ${suggestion}` 
+                };
                 initialChat.push(suggestionMessage);
             }
             
             setChatHistory(initialChat);
             
             // Speak both as a single block to ensure completion and no interruptions
-            const speechCombined = welcomeMessageText + (suggestion ? `. Here is a suggestion: ${suggestion}` : '');
+            let speechCombined = welcomeMessageText;
+            if (suggestion) {
+                speechCombined += `. Here is a suggestion: ${suggestion}. Just click the green eco button to switch the recipe.`;
+            }
             speak(speechCombined);
 
         } catch (e) {
@@ -87,7 +101,7 @@ const App: React.FC = () => {
         }
     }, [speak]);
 
-    const handleModifyInstructions = useCallback(async (prompt: string) => {
+    const handleModifyInstructions = useCallback(async (prompt: string, isEcoSwitch: boolean = false) => {
         if (!instructionSet) return;
 
         setIsModifying(true);
@@ -95,12 +109,22 @@ const App: React.FC = () => {
 
         try {
             const newInstructionSet = await modifyInstructions(instructionSet, prompt);
+            
+            if (isEcoSwitch) {
+                setIsEcoApplied(true);
+                // After switching, the previous suggestion is no longer needed
+                newInstructionSet.sustainabilitySuggestion = undefined;
+            } else if (prompt.toLowerCase().includes("sustainable alternative") || (instructionSet.sustainabilitySuggestion && prompt.includes(instructionSet.sustainabilitySuggestion))) {
+                setIsEcoApplied(true);
+                newInstructionSet.sustainabilitySuggestion = undefined;
+            }
+
             setInstructionSet(newInstructionSet);
             setCompletedSteps(new Array(newInstructionSet.steps.length).fill(false));
 
             const confirmationMessage: ChatMessageType = {
                 role: Role.ASSISTANT,
-                content: `I've updated the instructions as you requested. You can see the changes reflected above.`
+                content: `I've fully updated the recipe to be plant-based and sustainable. You can see the new ingredients and steps above.`
             };
             setChatHistory(prev => [...prev, confirmationMessage]);
             speak(confirmationMessage.content);
@@ -115,6 +139,20 @@ const App: React.FC = () => {
             setIsModifying(false);
         }
     }, [instructionSet, speak]);
+
+    const handleEcoSwitch = useCallback(() => {
+        if (isEcoApplied || !instructionSet) return;
+        
+        // Powerful prompt to ensure full transformation
+        const prompt = `REGENERATE THE ENTIRE RECIPE. 
+        MANDATORY ACTION: Remove ALL meat, fish, eggs, cheese, milk, butter, and any other animal-based products. 
+        REPLACEMENT: Replace every removed item with a high-quality, sustainable plant-based alternative (like beans, lentils, mushrooms, tofu, or nut milks). 
+        UPDATE MATERIALS: List every new ingredient with correct measurements.
+        UPDATE STEPS: Re-write EVERY instruction step to refer to the new ingredients. If a step previously said "cook the chicken", it must now say "cook the [replacement item]".
+        GUIDANCE: ${instructionSet.sustainabilitySuggestion || "Transform this into a vegan version."}`;
+
+        handleModifyInstructions(prompt, true);
+    }, [instructionSet, isEcoApplied, handleModifyInstructions]);
 
     const handleSendMessage = useCallback(async (message: string) => {
         if (!instructionSet || isAnswering) return;
@@ -262,6 +300,9 @@ const App: React.FC = () => {
                             onStopReading={handleStopReading}
                             isReadingInstructions={isReadingInstructions}
                             isMuted={isMuted}
+                            onEcoSwitch={handleEcoSwitch}
+                            isModifying={isModifying}
+                            isEcoApplied={isEcoApplied}
                         />
                         <ActionButtons onModify={handleModifyInstructions} disabled={isBusy} />
                     </>

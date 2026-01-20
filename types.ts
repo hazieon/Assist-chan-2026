@@ -4,6 +4,7 @@ export interface InstructionSet {
     materials: string[];
     steps: string[];
     sources?: { uri: string; title: string; }[];
+    sustainabilitySuggestion?: string;
 }
 
 export enum Role {
