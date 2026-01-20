@@ -32,7 +32,9 @@ const InstructionDisplay: React.FC<InstructionDisplayProps> = ({
     isEcoApplied
 }) => {
     const allStepsCompleted = completedSteps.length > 0 && completedSteps.every(Boolean);
-    const showEcoButton = !!instructionSet.sustainabilitySuggestion || isEcoApplied;
+    
+    // Always show if it's a food recipe
+    const showEcoButton = !!instructionSet.isFood;
 
     return (
         <div className="bg-secondary p-5 md:p-6 rounded-xl shadow-lg">
@@ -49,13 +51,14 @@ const InstructionDisplay: React.FC<InstructionDisplayProps> = ({
                             disabled={isModifying || isEcoApplied}
                             className={`flex items-center justify-center rounded-full p-2.5 transition-all shadow-md active:scale-90 ${
                                 isEcoApplied 
-                                ? 'bg-gray-700 cursor-not-allowed' 
+                                ? 'bg-green-800/40 cursor-not-allowed opacity-90' 
                                 : 'bg-green-600 hover:bg-green-500'
                             }`}
-                            aria-label="Switch to sustainable version"
+                            aria-label={isEcoApplied ? "Already sustainable" : "Switch to sustainable version"}
+                            title={isEcoApplied ? "Already sustainable!" : "Make it eco-friendly"}
                         >
                             {isEcoApplied ? (
-                                <SmileIcon className="w-7 h-7 text-gray-400" />
+                                <SmileIcon className="w-7 h-7 text-green-400" />
                             ) : (
                                 <LeafIcon className="w-7 h-7 text-white animate-pulse" />
                             )}
@@ -99,7 +102,7 @@ const InstructionDisplay: React.FC<InstructionDisplayProps> = ({
                             key={index} 
                             className={`flex items-start gap-3 p-4 rounded-lg transition-all border border-transparent ${
                                 completedSteps[index] 
-                                ? 'bg-green-900/10 border-green-800/30 text-text-secondary italic' 
+                                ? 'bg-green-900/10 border-green-800/30 text-text-secondary italic line-through' 
                                 : 'bg-primary/40'
                             }`}
                         >

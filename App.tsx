@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { InstructionSet, ChatMessage as ChatMessageType, Role } from './types';
-import { extractInstructionsFromUrl, getSustainableSuggestion, getChatResponse, modifyInstructions } from './services/geminiService';
+import { extractInstructionsFromUrl, getSustainableSuggestion, getChatResponse, modifyInstructions, detectModificationIntent } from './services/geminiService';
 import UrlInputForm from './components/UrlInputForm';
 import ChatInterface from './components/ChatInterface';
 import InstructionDisplay from './components/RecipeDisplay';
@@ -27,236 +27,141 @@ const App: React.FC = () => {
     
     const isMutedRef = useRef(isMuted);
     isMutedRef.current = isMuted;
-    const readingUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-    // Critical for Mobile: Unlock SpeechSynthesis on first user interaction
     const primeSpeech = useCallback(() => {
         if (hasPrimed || !window.speechSynthesis) return;
         const utterance = new SpeechSynthesisUtterance('');
         utterance.volume = 0;
         window.speechSynthesis.speak(utterance);
         setHasPrimed(true);
-        console.log('Speech primed for mobile');
     }, [hasPrimed]);
 
-    const handleToggleStep = (index: number) => {
-        setCompletedSteps(prev => {
-            const newCompleted = [...prev];
-            newCompleted[index] = !newCompleted[index];
-            return newCompleted;
-        });
-    };
-    
-    const speak = useCallback((text: string) => {
-        if (!window.speechSynthesis || isMutedRef.current) return;
-        
-        // Stop any current speech
+    const speak = useCallback((text: string, onEnd?: () => void) => {
+        if (!window.speechSynthesis || isMutedRef.current) {
+            onEnd?.();
+            return;
+        }
         window.speechSynthesis.cancel();
-        
-        // Clean text for cleaner TTS
-        const cleanText = text.replace(/\*\*/g, '').replace(/#/g, '').replace(/\[.*?\]/g, '');
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        
-        // Mobile browsers (Safari/Chrome) specific settings for clarity
-        utterance.rate = 1;
-        utterance.pitch = 1;
-        utterance.volume = 1;
-        
-        // Force a brief delay for some mobile browsers to register the cancelation
-        setTimeout(() => {
-            window.speechSynthesis.speak(utterance);
-        }, 50);
+        const utterance = new SpeechSynthesisUtterance(text.replace(/[*#]/g, ''));
+        utterance.rate = 1.05; // Natural but efficient speed
+        if (onEnd) {
+            utterance.onend = onEnd;
+            utterance.onerror = onEnd;
+        }
+        window.speechSynthesis.speak(utterance);
     }, []);
 
     const handleFetchInstructions = useCallback(async (url: string) => {
-        if (!url) {
-            setError('Please enter a valid URL.');
-            return;
-        }
-        
+        if (!url) return;
         primeSpeech();
         setIsLoading(true);
         setError(null);
-        setInstructionSet(null);
         setChatHistory([]);
-        setCompletedSteps([]);
-        setIsEcoApplied(false);
-        window.speechSynthesis.cancel();
         setIsReadingInstructions(false);
+        setIsEcoApplied(false);
 
         try {
-            const extractedInstructions = await extractInstructionsFromUrl(url);
-            const suggestion = await getSustainableSuggestion(extractedInstructions.title, extractedInstructions.materials);
+            const data = await extractInstructionsFromUrl(url);
             
-            if (suggestion) {
-                extractedInstructions.sustainabilitySuggestion = suggestion;
+            let showEcoInfo = false;
+            if (data.isFood) {
+                if (data.hasAnimalProducts) {
+                    const sug = await getSustainableSuggestion(data.title, data.materials);
+                    if (sug) data.sustainabilitySuggestion = sug;
+                    setIsEcoApplied(false);
+                    showEcoInfo = true;
+                } else {
+                    setIsEcoApplied(true); // Already vegan/sustainable
+                }
             }
 
-            setInstructionSet(extractedInstructions);
-            setCompletedSteps(new Array(extractedInstructions.steps.length).fill(false));
+            setInstructionSet(data);
+            setCompletedSteps(new Array(data.steps.length).fill(false));
             
-            const welcomeMessageText = `I have loaded the instructions for **${extractedInstructions.title}**. How can I help?`;
-            const welcomeMessage: ChatMessageType = { role: Role.ASSISTANT, content: welcomeMessageText };
-            let initialChat: ChatMessageType[] = [welcomeMessage];
-            
-            if (suggestion) {
-                const suggestionMessage: ChatMessageType = { 
-                    role: Role.ASSISTANT, 
-                    content: `**Sustainability Suggestion:** ${suggestion}` 
-                };
-                initialChat.push(suggestionMessage);
-            }
-            
-            setChatHistory(initialChat);
-            
-            let speechCombined = welcomeMessageText;
-            if (suggestion) {
-                speechCombined += `. Here is a suggestion: ${suggestion}. Use the green eco button if you want to swap.`;
-            }
-            speak(speechCombined);
+            const msg = `Loaded ${data.title}.`;
+            setChatHistory([{ role: Role.ASSISTANT, content: msg }]);
 
+            // Build requested speech string
+            let welcomeSpeech = `here is the instructions for ${data.title}. You can convert the units, scale the materials`;
+            if (showEcoInfo) {
+                welcomeSpeech += `, or generate a sustainable version by clicking the green eco button`;
+            }
+            welcomeSpeech += `. Enjoy.`;
+            
+            speak(welcomeSpeech);
         } catch (e) {
-            console.error(e);
-            setError(`Failed to process instructions. Please try another link.`);
+            setError("Error loading URL. Please check the link and try again.");
         } finally {
             setIsLoading(false);
         }
     }, [speak, primeSpeech]);
 
-    const handleModifyInstructions = useCallback(async (prompt: string, isEcoSwitch: boolean = false) => {
+    const handleModifyInstructions = useCallback(async (prompt: string, isEcoSwitch: boolean = false, customChatMsg?: string) => {
         if (!instructionSet) return;
-
         primeSpeech();
         setIsModifying(true);
-        setError(null);
+        window.speechSynthesis.cancel();
+        setIsReadingInstructions(false);
 
         try {
-            const newInstructionSet = await modifyInstructions(instructionSet, prompt);
-            
+            const updated = await modifyInstructions(instructionSet, prompt);
             if (isEcoSwitch) {
                 setIsEcoApplied(true);
-                newInstructionSet.sustainabilitySuggestion = undefined;
+                updated.hasAnimalProducts = false;
+            } else {
+                // Keep relevant flags
+                updated.hasAnimalProducts = updated.hasAnimalProducts ?? instructionSet.hasAnimalProducts;
             }
 
-            setInstructionSet(newInstructionSet);
-            setCompletedSteps(new Array(newInstructionSet.steps.length).fill(false));
-
-            const confirmationMessage: ChatMessageType = {
-                role: Role.ASSISTANT,
-                content: `Recipe updated. You can see the new ${isEcoApplied ? 'vegan ' : ''}instructions above.`
-            };
-            setChatHistory(prev => [...prev, confirmationMessage]);
-            speak(confirmationMessage.content);
-
+            setInstructionSet(updated);
+            setCompletedSteps(new Array(updated.steps.length).fill(false));
+            const chatMsg = customChatMsg || "I have updated the recipe for you.";
+            setChatHistory(prev => [...prev, { role: Role.ASSISTANT, content: chatMsg }]);
+            speak(chatMsg);
         } catch (e) {
-            console.error(e);
-            setError(`Error updating instructions.`);
+            setError("Update failed.");
         } finally {
             setIsModifying(false);
         }
-    }, [instructionSet, speak, primeSpeech, isEcoApplied]);
-
-    const handleEcoSwitch = useCallback(() => {
-        if (isEcoApplied || !instructionSet) return;
-        
-        const prompt = `REGENERATE THE ENTIRE RECIPE. 
-        MANDATORY: Remove ALL animal-based products (meat, fish, eggs, dairy, honey). 
-        REPLACE: Use sustainable plant-based alternatives. 
-        UPDATE MATERIALS AND STEPS COMPLETELY.
-        GUIDANCE: ${instructionSet.sustainabilitySuggestion || "Transform this into a vegan version."}`;
-
-        handleModifyInstructions(prompt, true);
-    }, [instructionSet, isEcoApplied, handleModifyInstructions]);
+    }, [instructionSet, speak, primeSpeech]);
 
     const handleSendMessage = useCallback(async (message: string) => {
         if (!instructionSet || isAnswering) return;
-
         primeSpeech();
         setIsAnswering(true);
         window.speechSynthesis.cancel();
         setIsReadingInstructions(false);
-        const userMessage: ChatMessageType = { role: Role.USER, content: message };
-        setChatHistory(prev => [...prev, userMessage]);
+        setChatHistory(prev => [...prev, { role: Role.USER, content: message }]);
 
         try {
-            const aiResponse = await getChatResponse(
-                instructionSet,
-                chatHistory,
-                message,
-                completedSteps
-            );
-            
-            const assistantMessage: ChatMessageType = { role: Role.ASSISTANT, content: aiResponse };
-            setChatHistory(prev => [...prev, assistantMessage]);
-            speak(aiResponse);
-
+            const modSummary = await detectModificationIntent(message);
+            if (modSummary) {
+                setIsAnswering(false);
+                const chatConfirmation = `I have regenerated the recipe to make it ${modSummary.toLowerCase()}. If you want to switch back, let me know.`;
+                await handleModifyInstructions(message, false, chatConfirmation);
+            } else {
+                const aiResponse = await getChatResponse(instructionSet, chatHistory, message, completedSteps);
+                setChatHistory(prev => [...prev, { role: Role.ASSISTANT, content: aiResponse }]);
+                speak(aiResponse);
+                setIsAnswering(false);
+            }
         } catch (e) {
-            console.error(e);
-            const errorResponse: ChatMessageType = { role: Role.ASSISTANT, content: `I'm sorry, I'm having trouble processing that right now.` };
-            setChatHistory(prev => [...prev, errorResponse]);
-        } finally {
             setIsAnswering(false);
         }
-    }, [instructionSet, isAnswering, speak, chatHistory, completedSteps, primeSpeech]);
-    
-    const handleToggleMute = () => {
-        setIsMuted(prev => {
-            const newMutedState = !prev;
-            if (newMutedState) {
-                window.speechSynthesis.cancel();
-                setIsReadingInstructions(false);
-            } else {
-                primeSpeech();
-            }
-            return newMutedState;
-        });
-    };
+    }, [instructionSet, isAnswering, speak, chatHistory, completedSteps, primeSpeech, handleModifyInstructions]);
 
     const handleReadInstructions = useCallback(() => {
         if (!instructionSet || isMuted) return;
-
-        primeSpeech();
-        window.speechSynthesis.cancel();
-        
-        const textToSpeak = instructionSet.steps
-            .filter((_, index) => !completedSteps[index])
-            .join('. ');
-
-        if (!textToSpeak.trim()) {
-            speak("All steps are done.");
-            return;
+        const remainingSteps = instructionSet.steps.filter((_, i) => !completedSteps[i]);
+        const txt = remainingSteps.join('. ');
+        if (!txt.trim()) { 
+            speak("No more steps to read."); 
+            return; 
         }
-
-        const cleanText = textToSpeak.replace(/\*\*/g, '').replace(/#/g, '');
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        readingUtteranceRef.current = utterance;
-
-        utterance.onstart = () => setIsReadingInstructions(true);
-        utterance.onend = () => {
-            setIsReadingInstructions(false);
-            readingUtteranceRef.current = null;
-        };
-        utterance.onerror = () => {
-            setIsReadingInstructions(false);
-            readingUtteranceRef.current = null;
-        };
-
-        window.speechSynthesis.speak(utterance);
-    }, [instructionSet, completedSteps, isMuted, speak, primeSpeech]);
-
-    const handleStopReading = useCallback(() => {
-        window.speechSynthesis.cancel();
-        setIsReadingInstructions(false);
-        readingUtteranceRef.current = null;
-    }, []);
-
-    useEffect(() => {
-        return () => {
-            window.speechSynthesis.cancel();
-        };
-    }, []);
-    
-    const isBusy = isLoading || isAnswering || isModifying;
+        
+        setIsReadingInstructions(true);
+        speak(txt, () => setIsReadingInstructions(false));
+    }, [instructionSet, completedSteps, isMuted, speak]);
 
     return (
         <div 
@@ -264,88 +169,81 @@ const App: React.FC = () => {
             onClick={primeSpeech}
             onTouchStart={primeSpeech}
         >
-            <header className="bg-secondary p-4 shadow-md sticky top-0 z-20">
+            <header className="bg-secondary p-3 shadow-md sticky top-0 z-20">
                 <div className="container mx-auto flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <BotIcon className="w-6 h-6 text-accent" />
-                        <h1 className="text-lg md:text-xl font-bold truncate max-w-[150px] sm:max-w-none">AI Instructions</h1>
+                    <div className="flex items-center gap-2">
+                        <BotIcon className="w-5 h-5 text-accent" />
+                        <h1 className="text-md md:text-lg font-bold">Chef AI</h1>
                     </div>
                     <div className="flex items-center gap-2">
                          <button
-                            onClick={() => { primeSpeech(); setIsContinuousListening(prev => !prev); }}
-                            className={`p-2 rounded-full relative transition-colors ${
-                                isContinuousListening ? 'bg-red-600' : 'hover:bg-primary'
-                            }`}
-                            aria-label={isContinuousListening ? 'Stop listening' : 'Start listening'}
+                            onClick={() => setIsContinuousListening(prev => !prev)}
+                            className={`p-2 rounded-full transition-colors ${isContinuousListening ? 'bg-red-600' : 'bg-primary/50 hover:bg-primary'}`}
+                            title="Voice Input"
                         >
                             <MicIcon className="w-5 h-5 text-white" />
-                            {isContinuousListening && (
-                                <span className="animate-ping absolute top-0 left-0 inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            )}
                         </button>
                         <button
-                            onClick={handleToggleMute}
-                            className="p-2 rounded-full hover:bg-primary transition-colors"
-                            aria-label={isMuted ? 'Enable audio' : 'Mute audio'}
+                            onClick={() => setIsMuted(!isMuted)}
+                            className="p-2 rounded-full bg-primary/50 hover:bg-primary"
+                            title="Mute/Unmute"
                         >
-                            {isMuted ? (
-                                <SpeakerMuteIcon className="w-5 h-5 text-text-secondary" />
-                            ) : (
-                                <SpeakerIcon className="w-5 h-5 text-accent" />
-                            )}
+                            {isMuted ? <SpeakerMuteIcon className="w-5 h-5" /> : <SpeakerIcon className="w-5 h-5 text-accent" />}
                         </button>
                     </div>
                 </div>
             </header>
 
-            <main className="flex-grow container mx-auto p-4 md:p-6 lg:p-8 flex flex-col gap-6 max-w-4xl">
+            <main className="flex-grow container mx-auto p-4 flex flex-col gap-4 max-w-4xl">
                 <UrlInputForm onFetch={handleFetchInstructions} isLoading={isLoading || isModifying} />
                 
-                {error && <div className="bg-red-900/50 border border-red-700 text-red-200 p-3 rounded-lg text-sm">{error}</div>}
+                {error && <div className="bg-red-900/50 p-2 rounded text-xs border border-red-700 animate-pulse">{error}</div>}
                 
                 {isLoading && (
-                    <div className="flex justify-center items-center py-10">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>
+                    <div className="flex justify-center py-6">
+                        <div className="animate-spin h-8 w-8 border-b-2 border-accent rounded-full"></div>
                     </div>
                 )}
                 
                 {instructionSet && !isLoading && (
-                    <div className="flex flex-col gap-6 animate-fade-in">
+                    <div className="animate-fade-in flex flex-col gap-4">
                         <InstructionDisplay 
                             instructionSet={instructionSet}
                             completedSteps={completedSteps}
-                            onToggleStep={handleToggleStep}
+                            onToggleStep={(i) => {
+                                const next = [...completedSteps];
+                                next[i] = !next[i];
+                                setCompletedSteps(next);
+                            }}
                             onReadInstructions={handleReadInstructions}
-                            onStopReading={handleStopReading}
+                            onStopReading={() => {
+                                window.speechSynthesis.cancel();
+                                setIsReadingInstructions(false);
+                            }}
                             isReadingInstructions={isReadingInstructions}
                             isMuted={isMuted}
-                            onEcoSwitch={handleEcoSwitch}
+                            onEcoSwitch={() => handleModifyInstructions("Regenerate this recipe completely as a sustainable VEGAN version. Replace all meat, dairy, honey, and animal-based items with plant-based alternatives.", true, "I have transformed this recipe into a fully sustainable, vegan version for you.")}
                             isModifying={isModifying}
                             isEcoApplied={isEcoApplied}
                         />
-                        <ActionButtons onModify={handleModifyInstructions} disabled={isBusy} />
+                        <ActionButtons onModify={handleModifyInstructions} disabled={isLoading || isAnswering || isModifying} />
                     </div>
                 )}
                 
                 {chatHistory.length > 0 && !isLoading && (
-                    <div className="bg-secondary p-4 md:p-6 rounded-lg shadow-lg flex-shrink-0">
-                        <h2 className="text-lg md:text-xl font-bold mb-4 text-accent">Voice Chat Assistant</h2>
+                    <div className="bg-secondary p-4 rounded-lg shadow-inner">
                         <ChatInterface
                             chatHistory={chatHistory}
                             onSendMessage={handleSendMessage}
                             isAnswering={isAnswering || isModifying}
                             isContinuousListening={isContinuousListening}
-                            onToggleListening={() => { primeSpeech(); setIsContinuousListening(prev => !prev); }}
+                            onToggleListening={() => setIsContinuousListening(!isContinuousListening)}
                             isMuted={isMuted}
-                            onSpeak={speak}
+                            onSpeak={(t) => speak(t)}
                         />
                     </div>
                 )}
             </main>
-            
-            <footer className="p-4 text-center text-xs text-text-secondary">
-                Designed for mobile & desktop. 2026 Instructions Assistant.
-            </footer>
         </div>
     );
 };

@@ -5,6 +5,8 @@ export interface InstructionSet {
     steps: string[];
     sources?: { uri: string; title: string; }[];
     sustainabilitySuggestion?: string;
+    isFood?: boolean;
+    hasAnimalProducts?: boolean;
 }
 
 export enum Role {
