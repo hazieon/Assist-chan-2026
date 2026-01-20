@@ -28,6 +28,9 @@ const App: React.FC = () => {
     const isMutedRef = useRef(isMuted);
     isMutedRef.current = isMuted;
 
+    // We use a ref to track reading progress to avoid closure issues with sequential speech
+    const stopReadingRef = useRef(false);
+
     const primeSpeech = useCallback(() => {
         if (hasPrimed || !window.speechSynthesis) return;
         const utterance = new SpeechSynthesisUtterance('');
@@ -43,9 +46,11 @@ const App: React.FC = () => {
         }
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text.replace(/[*#]/g, ''));
-        utterance.rate = 1.05; // Natural but efficient speed
+        utterance.rate = 1.05;
         if (onEnd) {
-            utterance.onend = onEnd;
+            utterance.onend = () => {
+                if (!stopReadingRef.current) onEnd();
+            };
             utterance.onerror = onEnd;
         }
         window.speechSynthesis.speak(utterance);
@@ -59,10 +64,19 @@ const App: React.FC = () => {
         setChatHistory([]);
         setIsReadingInstructions(false);
         setIsEcoApplied(false);
+        stopReadingRef.current = true;
 
         try {
             const data = await extractInstructionsFromUrl(url);
             
+            // Model based detection with a client-side keyword fallback for "meat/animal products" 
+            // to ensure the Eco button is active when it should be.
+            const animalKeywords = ['meat', 'chicken', 'beef', 'pork', 'lamb', 'fish', 'egg', 'milk', 'dairy', 'cream', 'butter', 'honey', 'shrimp', 'steak', 'bacon', 'ham'];
+            const foundKeyword = data.materials.some(m => animalKeywords.some(k => m.toLowerCase().includes(k)));
+            
+            // Force the flag if keywords are found but model missed it
+            if (foundKeyword) data.hasAnimalProducts = true;
+
             let showEcoInfo = false;
             if (data.isFood) {
                 if (data.hasAnimalProducts) {
@@ -71,7 +85,7 @@ const App: React.FC = () => {
                     setIsEcoApplied(false);
                     showEcoInfo = true;
                 } else {
-                    setIsEcoApplied(true); // Already vegan/sustainable
+                    setIsEcoApplied(true);
                 }
             }
 
@@ -81,7 +95,6 @@ const App: React.FC = () => {
             const msg = `Loaded ${data.title}.`;
             setChatHistory([{ role: Role.ASSISTANT, content: msg }]);
 
-            // Build requested speech string
             let welcomeSpeech = `here is the instructions for ${data.title}. You can convert the units, scale the materials`;
             if (showEcoInfo) {
                 welcomeSpeech += `, or generate a sustainable version by clicking the green eco button`;
@@ -90,18 +103,54 @@ const App: React.FC = () => {
             
             speak(welcomeSpeech);
         } catch (e) {
-            setError("Error loading URL. Please check the link and try again.");
+            setError("Error loading URL. Please check the link.");
         } finally {
             setIsLoading(false);
         }
     }, [speak, primeSpeech]);
 
+    const handleReadInstructions = useCallback(() => {
+        if (!instructionSet || isMuted || !window.speechSynthesis) return;
+        
+        stopReadingRef.current = false;
+        setIsReadingInstructions(true);
+        
+        const readStep = (index: number) => {
+            if (stopReadingRef.current || index >= instructionSet.steps.length) {
+                setIsReadingInstructions(false);
+                if (index >= instructionSet.steps.length && !stopReadingRef.current) {
+                    speak("Instructions complete.");
+                }
+                return;
+            }
+
+            // Skip if checked off
+            if (completedSteps[index]) {
+                readStep(index + 1);
+                return;
+            }
+
+            const text = `Step ${index + 1}. ${instructionSet.steps[index]}`;
+            speak(text, () => {
+                // Short pause between steps
+                setTimeout(() => readStep(index + 1), 600);
+            });
+        };
+
+        readStep(0);
+    }, [instructionSet, completedSteps, isMuted, speak]);
+
+    const handleStopReading = useCallback(() => {
+        stopReadingRef.current = true;
+        window.speechSynthesis.cancel();
+        setIsReadingInstructions(false);
+    }, []);
+
     const handleModifyInstructions = useCallback(async (prompt: string, isEcoSwitch: boolean = false, customChatMsg?: string) => {
         if (!instructionSet) return;
         primeSpeech();
         setIsModifying(true);
-        window.speechSynthesis.cancel();
-        setIsReadingInstructions(false);
+        handleStopReading();
 
         try {
             const updated = await modifyInstructions(instructionSet, prompt);
@@ -109,13 +158,12 @@ const App: React.FC = () => {
                 setIsEcoApplied(true);
                 updated.hasAnimalProducts = false;
             } else {
-                // Keep relevant flags
                 updated.hasAnimalProducts = updated.hasAnimalProducts ?? instructionSet.hasAnimalProducts;
             }
 
             setInstructionSet(updated);
             setCompletedSteps(new Array(updated.steps.length).fill(false));
-            const chatMsg = customChatMsg || "I have updated the recipe for you.";
+            const chatMsg = customChatMsg || "I've updated the instructions for you.";
             setChatHistory(prev => [...prev, { role: Role.ASSISTANT, content: chatMsg }]);
             speak(chatMsg);
         } catch (e) {
@@ -123,21 +171,20 @@ const App: React.FC = () => {
         } finally {
             setIsModifying(false);
         }
-    }, [instructionSet, speak, primeSpeech]);
+    }, [instructionSet, speak, primeSpeech, handleStopReading]);
 
     const handleSendMessage = useCallback(async (message: string) => {
         if (!instructionSet || isAnswering) return;
         primeSpeech();
         setIsAnswering(true);
-        window.speechSynthesis.cancel();
-        setIsReadingInstructions(false);
+        handleStopReading();
         setChatHistory(prev => [...prev, { role: Role.USER, content: message }]);
 
         try {
             const modSummary = await detectModificationIntent(message);
             if (modSummary) {
                 setIsAnswering(false);
-                const chatConfirmation = `I have regenerated the recipe to make it ${modSummary.toLowerCase()}. If you want to switch back, let me know.`;
+                const chatConfirmation = `I have updated the recipe based on your request: ${modSummary.toLowerCase()}.`;
                 await handleModifyInstructions(message, false, chatConfirmation);
             } else {
                 const aiResponse = await getChatResponse(instructionSet, chatHistory, message, completedSteps);
@@ -148,20 +195,7 @@ const App: React.FC = () => {
         } catch (e) {
             setIsAnswering(false);
         }
-    }, [instructionSet, isAnswering, speak, chatHistory, completedSteps, primeSpeech, handleModifyInstructions]);
-
-    const handleReadInstructions = useCallback(() => {
-        if (!instructionSet || isMuted) return;
-        const remainingSteps = instructionSet.steps.filter((_, i) => !completedSteps[i]);
-        const txt = remainingSteps.join('. ');
-        if (!txt.trim()) { 
-            speak("No more steps to read."); 
-            return; 
-        }
-        
-        setIsReadingInstructions(true);
-        speak(txt, () => setIsReadingInstructions(false));
-    }, [instructionSet, completedSteps, isMuted, speak]);
+    }, [instructionSet, isAnswering, speak, chatHistory, completedSteps, primeSpeech, handleModifyInstructions, handleStopReading]);
 
     return (
         <div 
@@ -216,13 +250,10 @@ const App: React.FC = () => {
                                 setCompletedSteps(next);
                             }}
                             onReadInstructions={handleReadInstructions}
-                            onStopReading={() => {
-                                window.speechSynthesis.cancel();
-                                setIsReadingInstructions(false);
-                            }}
+                            onStopReading={handleStopReading}
                             isReadingInstructions={isReadingInstructions}
                             isMuted={isMuted}
-                            onEcoSwitch={() => handleModifyInstructions("Regenerate this recipe completely as a sustainable VEGAN version. Replace all meat, dairy, honey, and animal-based items with plant-based alternatives.", true, "I have transformed this recipe into a fully sustainable, vegan version for you.")}
+                            onEcoSwitch={() => handleModifyInstructions("Regenerate this recipe completely as a sustainable VEGAN version. Replace all animal products (meat, poultry, seafood, dairy, eggs, honey) with plant-based alternatives.", true, "I've updated this to a fully vegan, sustainable version.")}
                             isModifying={isModifying}
                             isEcoApplied={isEcoApplied}
                         />
