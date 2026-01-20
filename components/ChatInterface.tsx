@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage as ChatMessageType } from '../types';
 import ChatMessage from './ChatMessage';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
 
-// Fix: Add TypeScript definitions for the Web Speech API to prevent type errors.
+// Types for Web Speech API
 declare global {
     interface SpeechRecognition extends EventTarget {
         continuous: boolean;
@@ -12,7 +13,6 @@ declare global {
         lang: string;
         start(): void;
         stop(): void;
-        // FIX: Add the `abort` method to the SpeechRecognition interface definition.
         abort(): void;
         onstart: () => void;
         onresult: (event: SpeechRecognitionEvent) => void;
@@ -27,22 +27,17 @@ declare global {
 
     interface SpeechRecognitionResultList {
         [index: number]: SpeechRecognitionResult;
-        // FIX: Add `readonly` modifier to match DOM API and resolve type error.
         readonly length: number;
     }
 
     interface SpeechRecognitionResult {
         [index: number]: SpeechRecognitionAlternative;
-        // FIX: Add `readonly` modifier to match DOM API and resolve type error.
         readonly isFinal: boolean;
-        // FIX: Add `readonly` modifier to match DOM API and resolve type error.
         readonly length: number;
     }
 
     interface SpeechRecognitionAlternative {
-        // FIX: Add `readonly` modifier to match DOM API and resolve type error.
         readonly transcript: string;
-        // FIX: Add `readonly` modifier to match DOM API and resolve type error.
         readonly confidence: number;
     }
 
@@ -56,7 +51,6 @@ declare global {
     }
 }
 
-
 interface ChatInterfaceProps {
     chatHistory: ChatMessageType[];
     onSendMessage: (message: string) => void;
@@ -67,12 +61,20 @@ interface ChatInterfaceProps {
     onSpeak: (text: string) => void;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatHistory, onSendMessage, isAnswering, isContinuousListening, onToggleListening, isMuted, onSpeak }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
+    chatHistory, 
+    onSendMessage, 
+    isAnswering, 
+    isContinuousListening, 
+    onToggleListening, 
+    isMuted, 
+    onSpeak 
+}) => {
     const [message, setMessage] = useState('');
     const recognitionRef = useRef<SpeechRecognition | null>(null);
-    const isContinuousListeningRef = useRef(isContinuousListening);
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    
+    const isContinuousListeningRef = useRef(isContinuousListening);
+
     isContinuousListeningRef.current = isContinuousListening;
 
     useEffect(() => {
@@ -83,15 +85,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatHistory, onSendMessag
     
     useEffect(() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            console.warn("Speech recognition not supported in this browser.");
-            return;
-        }
+        if (!SpeechRecognition) return;
         
-        recognitionRef.current = new SpeechRecognition();
-        const recognition = recognitionRef.current;
+        const recognition = new SpeechRecognition();
+        recognitionRef.current = recognition;
+        
+        // Mobile browsers often ignore 'continuous' or time out quickly
         recognition.continuous = true;
         recognition.interimResults = false;
+        recognition.lang = 'en-US';
 
         recognition.onresult = (event) => {
             let finalTranscript = '';
@@ -106,37 +108,41 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatHistory, onSendMessag
         };
 
         recognition.onerror = (event) => {
-            // Don't log common, non-critical speech recognition errors.
-            if (event.error === 'no-speech' || event.error === 'aborted') {
-                return;
+            console.warn('Speech Recognition Error:', event.error);
+            if (event.error === 'not-allowed') {
+                alert('Microphone access denied. Please enable it in settings.');
+                onToggleListening();
             }
-            console.error('Speech recognition error:', event.error);
-            onToggleListening(); // Turn off on error
         };
         
         recognition.onend = () => {
+            // Aggressive restart for mobile Safari/Chrome if continuous mode is active
             if (isContinuousListeningRef.current) {
-                recognition.start();
+                try {
+                    recognition.start();
+                } catch (e) {
+                    // Start might fail if already active
+                }
             }
         };
         
         return () => {
-            if (recognitionRef.current) {
-                recognitionRef.current.onend = null; // Prevent restart on unmount
-                recognitionRef.current.abort();
-            }
+            recognition.onend = null;
+            recognition.abort();
         };
-
     }, [onSendMessage, onToggleListening]);
     
     useEffect(() => {
         if (isContinuousListening) {
-            recognitionRef.current?.start();
+            try {
+                recognitionRef.current?.start();
+            } catch (e) {}
         } else {
-            recognitionRef.current?.stop();
+            try {
+                recognitionRef.current?.stop();
+            } catch (e) {}
         }
     }, [isContinuousListening]);
-
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -147,45 +153,51 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ chatHistory, onSendMessag
     };
 
     return (
-        <div className="flex flex-col h-[60vh] max-h-[70vh]">
-            <div ref={chatContainerRef} className="flex-grow overflow-y-auto mb-4 p-4 bg-primary rounded-lg space-y-4">
+        <div className="flex flex-col h-[40vh] md:h-[50vh] min-h-[300px]">
+            <div 
+                ref={chatContainerRef} 
+                className="flex-grow overflow-y-auto mb-4 p-3 bg-primary rounded-lg space-y-3 scroll-smooth"
+            >
                 {chatHistory.map((msg, index) => (
                     <ChatMessage key={index} message={msg} isMuted={isMuted} onSpeak={onSpeak} />
                 ))}
                 {isAnswering && (
-                    <div className="flex items-center space-x-2 animate-pulse">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center">
-                            <div className="w-5 h-5 text-white"></div>
-                        </div>
-                        <div className="h-4 bg-gray-600 rounded w-3/4"></div>
+                    <div className="flex items-center space-x-2 p-2 opacity-50">
+                        <div className="w-2 h-2 bg-accent rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-accent rounded-full animate-bounce [animation-delay:-.3s]"></div>
+                        <div className="w-2 h-2 bg-accent rounded-full animate-bounce [animation-delay:-.5s]"></div>
                     </div>
                 )}
             </div>
+            
             <form onSubmit={handleSubmit} className="flex items-center gap-2">
-                <input
-                    type="text"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    placeholder={isContinuousListening ? "Listening continuously..." : "Type a message or press mic to talk..."}
-                    className="flex-grow p-3 bg-primary border border-gray-600 rounded-md focus:ring-2 focus:ring-accent focus:outline-none transition"
-                    disabled={isAnswering}
-                />
+                <div className="relative flex-grow">
+                    <input
+                        type="text"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        placeholder={isContinuousListening ? "I'm listening..." : "Ask me anything..."}
+                        className="w-full p-3 pr-10 bg-primary border border-gray-700 rounded-lg focus:ring-2 focus:ring-accent focus:outline-none transition-all text-sm"
+                        disabled={isAnswering}
+                    />
+                </div>
                 <button
                     type="button"
                     onClick={onToggleListening}
-                    className={`p-3 rounded-md transition-colors relative ${isContinuousListening ? 'bg-red-600' : 'bg-accent hover:bg-indigo-500'}`}
+                    className={`p-3 rounded-lg transition-all active:scale-95 ${
+                        isContinuousListening ? 'bg-red-600' : 'bg-secondary hover:bg-gray-700'
+                    }`}
                     disabled={isAnswering}
-                    aria-label={isContinuousListening ? 'Stop listening' : 'Start continuous listening'}
+                    aria-label="Toggle voice input"
                 >
-                    <MicIcon className="w-6 h-6 text-white" />
-                    {isContinuousListening && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>}
+                    <MicIcon className={`w-5 h-5 ${isContinuousListening ? 'text-white' : 'text-accent'}`} />
                 </button>
                 <button
                     type="submit"
-                    className="p-3 bg-accent rounded-md hover:bg-indigo-500 transition-colors disabled:bg-gray-600"
+                    className="p-3 bg-accent rounded-lg hover:bg-indigo-500 transition-all active:scale-95 disabled:bg-gray-700 disabled:opacity-50"
                     disabled={!message.trim() || isAnswering}
                 >
-                    <SendIcon className="w-6 h-6 text-white" />
+                    <SendIcon className="w-5 h-5 text-white" />
                 </button>
             </form>
         </div>

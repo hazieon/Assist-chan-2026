@@ -32,107 +32,114 @@ const InstructionDisplay: React.FC<InstructionDisplayProps> = ({
     isEcoApplied
 }) => {
     const allStepsCompleted = completedSteps.length > 0 && completedSteps.every(Boolean);
-
-    // Only show the eco button if there is a suggestion (meat/dairy detected) OR if we already switched (Eco Applied)
     const showEcoButton = !!instructionSet.sustainabilitySuggestion || isEcoApplied;
 
     return (
-        <div className="bg-secondary p-6 rounded-lg shadow-lg animate-fade-in">
-            <h2 className="text-3xl font-bold mb-6 border-b-2 border-accent pb-4">{instructionSet.title}</h2>
+        <div className="bg-secondary p-5 md:p-6 rounded-xl shadow-lg">
+            <h2 className="text-2xl md:text-3xl font-bold mb-6 border-b border-gray-700 pb-4 leading-tight">
+                {instructionSet.title}
+            </h2>
 
-            <div className="mb-8">
+            <section className="mb-8">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-semibold text-accent">Materials / Ingredients</h3>
+                    <h3 className="text-lg font-semibold text-accent uppercase tracking-wider">Materials</h3>
                     {showEcoButton && (
                         <button
                             onClick={onEcoSwitch}
                             disabled={isModifying || isEcoApplied}
-                            className={`flex items-center justify-center rounded-full p-2 transition-all shadow-lg group ${
+                            className={`flex items-center justify-center rounded-full p-2.5 transition-all shadow-md active:scale-90 ${
                                 isEcoApplied 
-                                ? 'bg-gray-600 cursor-not-allowed opacity-70' 
-                                : 'bg-green-600 hover:bg-green-700 hover:scale-110'
+                                ? 'bg-gray-700 cursor-not-allowed' 
+                                : 'bg-green-600 hover:bg-green-500'
                             }`}
-                            aria-label={isEcoApplied ? "Sustainable version applied" : "Switch to sustainable version"}
-                            title={isEcoApplied ? "Sustainable version applied!" : "Switch to a sustainable version"}
+                            aria-label="Switch to sustainable version"
                         >
                             {isEcoApplied ? (
-                                <SmileIcon className="w-8 h-8 text-gray-300" />
+                                <SmileIcon className="w-7 h-7 text-gray-400" />
                             ) : (
-                                <LeafIcon className="w-8 h-8 text-white group-hover:animate-pulse" />
+                                <LeafIcon className="w-7 h-7 text-white animate-pulse" />
                             )}
                         </button>
                     )}
                 </div>
-                <ul className="list-disc list-inside space-y-2 text-text-secondary">
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm md:text-base text-text-secondary">
                     {instructionSet.materials.map((material, index) => (
-                        <li key={index} className="pl-2">{material}</li>
+                        <li key={index} className="flex items-start gap-2 bg-primary/30 p-2 rounded">
+                            <span className="text-accent">•</span> {material}
+                        </li>
                     ))}
                 </ul>
-            </div>
+            </section>
 
-            <div>
-                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-semibold text-accent">Steps / Instructions</h3>
+            <section>
+                 <div className="flex items-center justify-between mb-5">
+                    <h3 className="text-lg font-semibold text-accent uppercase tracking-wider">Instructions</h3>
                     {isReadingInstructions ? (
                         <button
                             onClick={onStopReading}
-                            className="flex items-center gap-2 bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700 transition-colors"
-                            aria-label="Stop reading instructions"
+                            className="flex items-center gap-2 bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-500 transition-all active:scale-95 text-sm"
                         >
-                            <StopIcon className="w-5 h-5" />
-                            <span>Stop</span>
+                            <StopIcon className="w-4 h-4" />
+                            Stop
                         </button>
                     ) : (
                         <button
                             onClick={onReadInstructions}
                             disabled={isMuted || allStepsCompleted}
-                            className="flex items-center gap-2 bg-accent text-white font-bold py-2 px-4 rounded-md hover:bg-indigo-500 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
-                            aria-label="Read remaining instructions aloud"
-                            title={allStepsCompleted ? "All steps are completed" : isMuted ? "Audio is muted" : "Read remaining steps"}
+                            className="flex items-center gap-2 bg-accent text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-500 transition-all active:scale-95 text-sm disabled:opacity-40"
                         >
-                            <PlayIcon className="w-5 h-5" />
-                            <span>Read Aloud</span>
+                            <PlayIcon className="w-4 h-4" />
+                            Read All
                         </button>
                     )}
                 </div>
-                <ol className="list-none space-y-4">
+                <ol className="space-y-4">
                     {instructionSet.steps.map((step, index) => (
                         <li 
                             key={index} 
-                            className={`flex items-start gap-3 p-3 rounded-lg transition-all duration-300 ${completedSteps[index] ? 'bg-green-900 bg-opacity-30' : 'bg-transparent'}`}
+                            className={`flex items-start gap-3 p-4 rounded-lg transition-all border border-transparent ${
+                                completedSteps[index] 
+                                ? 'bg-green-900/10 border-green-800/30 text-text-secondary italic' 
+                                : 'bg-primary/40'
+                            }`}
                         >
-                            <span className="font-bold text-accent pt-1">{index + 1}.</span>
-                            <div className="flex-1 flex items-start gap-3">
+                            <div className="flex-shrink-0 mt-1">
                                 <input
                                     type="checkbox"
                                     id={`step-${index}`}
                                     checked={completedSteps[index] ?? false}
                                     onChange={() => onToggleStep(index)}
-                                    className="mt-1.5 h-5 w-5 rounded border-gray-500 bg-primary text-accent focus:ring-accent focus:ring-2 cursor-pointer"
-                                    aria-label={`Mark step ${index + 1} as complete`}
+                                    className="h-6 w-6 rounded border-gray-600 bg-primary text-accent focus:ring-accent cursor-pointer"
                                 />
-                                <label
-                                    htmlFor={`step-${index}`}
-                                    className={`flex-1 leading-relaxed cursor-pointer transition-colors ${completedSteps[index] ? 'line-through text-text-secondary' : ''}`}
-                                >
-                                    {step}
-                                </label>
                             </div>
+                            <label
+                                htmlFor={`step-${index}`}
+                                className="flex-1 text-sm md:text-base leading-relaxed cursor-pointer select-none"
+                            >
+                                <span className="font-bold mr-2 text-accent">{index + 1}.</span>
+                                {step}
+                            </label>
                         </li>
                     ))}
                 </ol>
-            </div>
+            </section>
 
             {instructionSet.sources && instructionSet.sources.length > 0 && (
-                <div className="mt-8">
-                    <h3 className="text-xl font-semibold mb-4 text-accent">Sources</h3>
-                    <ul className="list-disc list-inside space-y-2 text-text-secondary">
+                <div className="mt-8 pt-6 border-t border-gray-700">
+                    <h3 className="text-xs font-semibold text-text-secondary uppercase mb-3">Sources</h3>
+                    <div className="flex flex-wrap gap-3">
                         {instructionSet.sources.map((source, index) => (
-                            <li key={index} className="pl-2">
-                                <a href={source.uri} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{source.title || source.uri}</a>
-                            </li>
+                            <a 
+                                key={index} 
+                                href={source.uri} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-xs bg-primary/50 px-3 py-1.5 rounded-full text-accent hover:underline flex items-center gap-1"
+                            >
+                                {source.title || 'View Source'} ↗
+                            </a>
                         ))}
-                    </ul>
+                    </div>
                 </div>
             )}
         </div>
