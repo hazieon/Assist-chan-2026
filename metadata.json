@@ -1,0 +1,7 @@
+{
+  "name": "2026 AI Instructions Assistant",
+  "description": "An AI assistant that extracts instructions from web links, answers questions, modifies steps, and provides text-to-speech and speech-to-text guidance.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
